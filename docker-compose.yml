@@ -1,0 +1,37 @@
+# Copy .env.example to .env, fill it in, then:
+#
+#   docker compose up -d && docker compose logs -f
+#
+# The container registers an ACME account, issues the certificate over DNS-01,
+# installs it on the console, and then stays up renewing it. Everything is
+# configured through .env - see that file for the full list.
+
+services:
+  acme:
+    build: .
+    image: unifi-os-acme:local
+    container_name: unifi-os-acme
+    restart: unless-stopped
+
+    # Loads the whole file, which matters: your DNS provider's credentials are
+    # named by acme.sh (CF_Token, LINODE_V4_API_KEY, AWS_ACCESS_KEY_ID, ...) and
+    # this passes them through without needing an entry here for each one.
+    env_file: .env
+
+    volumes:
+      # Account key, certificates, per-domain config, and the renewal crontab.
+      # Back this up: losing it means re-registering and re-issuing.
+      - acme-data:/acme.sh
+
+    environment:
+      # Pin acme.sh to the version the image ships. See the Dockerfile.
+      AUTO_UPGRADE: "0"
+
+    # If the console's hostname only resolves on an internal view of DNS that
+    # this host does not use, pin it here rather than depending on the resolver.
+    # DNS-01 validation is unaffected either way - it never resolves this name.
+    #extra_hosts:
+    #  - "unifi.example.com:10.0.0.1"
+
+volumes:
+  acme-data:

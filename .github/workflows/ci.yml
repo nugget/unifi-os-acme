@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
+            --shell=sh --severity=warning deploy/unifi_os.sh dnsapi/dns_allns.sh \
+            entrypoint.sh test/gate_harness.sh
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
+            --shell=bash --severity=warning test/run.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The suite stands up mock nameservers and a mock UniFi OS console on a
+      # throwaway docker network. It never talks to a real CA or console.
+      - name: integration tests
+        run: bash test/run.sh
