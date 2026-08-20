@@ -1,12 +1,16 @@
 # unifi-os-acme
 
-Keeps a Let's Encrypt certificate on a UniFi OS console — automatically, in a
-container, configured entirely by environment variables.
+Maintains a valid certificate chain on a UniFi OS console.
+
+It runs as an ordinary container elsewhere on your network. Nothing is
+installed on the console and no SSH access to it is required — certificates are
+obtained from Let's Encrypt over DNS-01 and installed through the same
+undocumented API endpoints the console's own dashboard uses. The operator
+surface is a `.env` file and `docker compose up -d`.
 
 UniFi OS consoles ship with a self-signed `unifi.local` certificate and have no
 built-in ACME client. You can upload a certificate by hand through
-**Control Plane → Console → Certificates**, but there is nothing to renew it,
-so every 90 days someone has to remember. This does that part.
+**Control Plane → Console → Certificates**, but nothing renews it.
 
 ```sh
 # .env
