@@ -17,10 +17,23 @@ test:
     bash test/run.sh
 
 build:
-    docker build -t unifi-os-acme:local .
+    docker build \
+      --build-arg VERSION="$(git describe --tags --always --dirty)" \
+      --build-arg REVISION="$(git rev-parse HEAD)" \
+      --build-arg CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      -t unifi-os-acme:local .
 
-# Build and push a multi-arch image to GHCR.
+# Show the image's OCI labels. Without the LABEL block in the Dockerfile these
+# would be inherited from the base image and would claim to be acme.sh.
+labels: build
+    @docker image inspect unifi-os-acme:local | python3 -c "import json,sys; [print(k+'='+v) for k,v in sorted(json.load(sys.stdin)[0]['Config']['Labels'].items())]"
+
+# Build and push a multi-arch image to GHCR by hand. CI does this on push to
+# main and on release tags; this is for when you need it locally.
 # Requires: docker login ghcr.io
-push tag="latest":
-    docker buildx build --platform linux/amd64,linux/arm64 \
-      -t ghcr.io/nugget/unifi-os-acme:{{tag}} --push .
+push tag="edge":
+    docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
+      --build-arg VERSION="{{ tag }}" \
+      --build-arg REVISION="$(git rev-parse HEAD)" \
+      --build-arg CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      -t ghcr.io/nugget/unifi-os-acme:{{ tag }} --push .

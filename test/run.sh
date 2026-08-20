@@ -25,6 +25,22 @@ cleanup
 docker network create "$NET" >/dev/null
 
 # ---------------------------------------------------------------------------
+# Image metadata. Without an explicit LABEL block these are inherited from the
+# base image and the result claims to be acme.sh, pointing registries at the
+# wrong project. Easy to regress, invisible unless asserted.
+# ---------------------------------------------------------------------------
+echo "==> image metadata"
+label() { docker image inspect "$IMAGE" --format "{{index .Config.Labels \"$1\"}}"; }
+check "$(label org.opencontainers.image.title)" "unifi-os-acme" "declares its own title"
+check "$(label org.opencontainers.image.source)" "https://github.com/nugget/unifi-os-acme" "points at this repository"
+check "$(label org.opencontainers.image.licenses)" "GPL-3.0-only" "declares its license"
+if [ -n "$(label org.opencontainers.image.base.name)" ]; then
+  ok "records the base image it was built from"
+else
+  bad "records the base image it was built from"
+fi
+
+# ---------------------------------------------------------------------------
 # The propagation gate.
 #
 # Two authoritative nameservers for the same zone. dns1 publishes the challenge
