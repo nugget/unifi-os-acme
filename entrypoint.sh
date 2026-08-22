@@ -12,6 +12,9 @@ set -eu
 
 LE_CONFIG_HOME="${LE_CONFIG_HOME:-/acme.sh}"
 ACME="$LE_WORKING_DIR/acme.sh"
+
+# shellcheck source=lib/certpath.sh
+. /usr/local/lib/certpath.sh
 HOMEARGS="--home $LE_WORKING_DIR --config-home $LE_CONFIG_HOME"
 
 ACME_SERVER="${ACME_SERVER:-letsencrypt}"
@@ -78,11 +81,10 @@ fi
 
 # ---------------------------------------------------------------- issue once
 # Look for the certificate file itself rather than parsing `acme.sh --list`:
-# the file is the thing that matters, and healthcheck.sh locates it the same
-# way, so the two cannot disagree about whether a certificate exists.
-# acme.sh keeps EC certificates in <domain>_ecc.
+# the file is the thing that matters. select_cert is shared with the
+# healthcheck, so the two cannot disagree about which certificate is live.
 _have_cert() {
-  [ -f "$LE_CONFIG_HOME/$1/$1.cer" ] || [ -f "$LE_CONFIG_HOME/${1}_ecc/$1.cer" ]
+  select_cert "$1"
 }
 
 if _have_cert "$_primary" && [ "${ACME_FORCE_ISSUE:-0}" != "1" ]; then
@@ -116,9 +118,9 @@ fi
 # It is also the reconciliation step: on a restart with a certificate already
 # in hand, this is what notices that the console is serving something else. The
 # hook compares fingerprints and no-ops when the console is current.
-_ecc=""
-[ -d "$LE_CONFIG_HOME/${_primary}_ecc" ] && _ecc="--ecc"
-log "Installing the certificate on the console."
+select_cert "$_primary" || die "No certificate to install for $_primary."
+_ecc="$CERT_ECC_FLAG"
+log "Installing the certificate on the console (${CERT_FILE})."
 # shellcheck disable=SC2086
 if ! "$ACME" $HOMEARGS --deploy -d "$_primary" $_ecc --deploy-hook unifi_os; then
   # Deliberately not fatal: renewals should keep running even if the console is

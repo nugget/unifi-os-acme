@@ -17,7 +17,9 @@ COPY deploy/unifi_os.sh /acmebin/deploy/unifi_os.sh
 COPY dnsapi/dns_allns.sh /acmebin/dnsapi/dns_allns.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+COPY lib/certpath.sh /usr/local/lib/certpath.sh
 RUN chmod 0644 /acmebin/deploy/unifi_os.sh /acmebin/dnsapi/dns_allns.sh \
+  && chmod 0644 /usr/local/lib/certpath.sh \
   && chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

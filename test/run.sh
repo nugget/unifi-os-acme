@@ -33,6 +33,43 @@ docker network create "$NET" >/dev/null
 # `just release` version validation. The pattern is read out of the justfile
 # rather than restated here, so this tests the rule that actually runs.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Which certificate is the live one. Both an RSA and an EC certificate can
+# exist at once if the key type was ever changed, and the directory alone does
+# not say which is current - it survives a switch back and a failed issuance
+# can leave an empty one. entrypoint.sh and healthcheck.sh share this rule
+# precisely so they cannot pick differently and call a good console unhealthy.
+# ---------------------------------------------------------------------------
+echo "==> certificate selection"
+# A fresh fixture per case: mutating one directory across cases makes the
+# result depend on ordering and on how promptly the mount reflects a delete.
+pick() { # <have_rsa> <have_ecc> [env args...] -> "<cert file><ecc flag>"
+  _rsa="$1"; _ecc="$2"; shift 2
+  d=$(mktemp -d)
+  mkdir -p "$d/dual.test" "$d/dual.test_ecc"
+  [ "$_rsa" = y ] && touch "$d/dual.test/dual.test.cer"
+  [ "$_ecc" = y ] && touch "$d/dual.test_ecc/dual.test.cer"
+  docker run --rm -v "$d:/acme.sh" "$@" --entrypoint sh "$IMAGE" -c \
+    '. /usr/local/lib/certpath.sh; select_cert dual.test && printf "%s%s" "$CERT_FILE" "$CERT_ECC_FLAG" || printf NONE'
+  rm -rf "$d"
+}
+
+RSA=/acme.sh/dual.test/dual.test.cer
+ECC=/acme.sh/dual.test_ecc/dual.test.cer--ecc
+
+check "$(pick y y -e ACME_KEYLENGTH=2048)" "$RSA" \
+  "picks RSA when both exist and ACME_KEYLENGTH is RSA"
+check "$(pick y y -e ACME_KEYLENGTH=ec-256)" "$ECC" \
+  "picks EC when both exist and ACME_KEYLENGTH is EC"
+check "$(pick y y)" "$RSA" \
+  "defaults to RSA when both exist and no key length is set"
+check "$(pick n y -e ACME_KEYLENGTH=2048)" "$ECC" \
+  "picks EC when only EC exists, whatever the key length says"
+check "$(pick y n -e ACME_KEYLENGTH=ec-256)" "$RSA" \
+  "ignores an empty _ecc directory left by a failed issuance"
+check "$(pick n n)" "NONE" \
+  "reports nothing when no certificate exists"
+
 echo "==> release version validation"
 semver_re=$(sed -n 's/.*=~ \(.*\) \]\]; then/\1/p' justfile | head -1)
 if [ -z "$semver_re" ]; then
