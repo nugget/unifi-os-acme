@@ -72,14 +72,66 @@ release version:
     git fetch -q origin main
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || {
       echo "error: local main differs from origin/main; pull or push first." >&2; exit 1; }
+    gh auth status >/dev/null 2>&1 || {
+      echo "error: gh is not authenticated; run 'gh auth login'." >&2; exit 1; }
+    git rev-parse -q --verify "refs/tags/v$v" >/dev/null && {
+      echo "error: tag v$v already exists." >&2; exit 1; }
+
+    prerelease=""
+    [[ "$v" == *-* ]] && prerelease="--prerelease"
+
     git tag -s "v$v" -m "v$v"
     git push origin "v$v"
-    if [[ "$v" == *-* ]]; then
-      echo "pushed v$v - CI will publish ghcr.io/nugget/unifi-os-acme:$v"
-      echo "(prerelease: latest and ${v%%-*} major.minor are deliberately not moved)"
-    else
-      echo "pushed v$v - CI will publish ghcr.io/nugget/unifi-os-acme: $v, ${v%.*}, latest"
+    echo "pushed v$v"
+
+    # Wait for the image before publishing the release, so a release object
+    # never points at an image that failed to build. SKIP_IMAGE_WAIT=1 to
+    # publish immediately instead.
+    if [[ "${SKIP_IMAGE_WAIT:-0}" != "1" ]]; then
+      echo "waiting for the image workflow..."
+      run=""
+      for _ in $(seq 40); do
+        run=$(gh run list --workflow image.yml --json databaseId,headBranch \
+                --jq "[.[] | select(.headBranch == \"v$v\")][0].databaseId" 2>/dev/null || true)
+        [[ -n "$run" && "$run" != "null" ]] && break
+        sleep 5
+      done
+      if [[ -z "$run" || "$run" == "null" ]]; then
+        echo "error: could not find the image workflow run for v$v." >&2
+        echo "       Check it, then: SKIP_IMAGE_WAIT=1 just release $v" >&2
+        exit 1
+      fi
+      gh run watch "$run" --exit-status >/dev/null || {
+        echo "error: the image workflow failed; not publishing a release." >&2
+        echo "       Fix it, delete the tag, and cut it again:" >&2
+        echo "         git push origin :refs/tags/v$v && git tag -d v$v" >&2
+        exit 1; }
+      echo "image published"
     fi
+
+    # Generated notes plus a header saying what to pull. The API needs the tag
+    # to exist, which is why this runs after the push.
+    notes=$(mktemp)
+    trap 'rm -f "$notes"' EXIT
+    {
+      echo "## Image"
+      echo
+      echo '```'
+      echo "docker pull ghcr.io/nugget/unifi-os-acme:$v"
+      echo '```'
+      echo
+      if [[ -n "$prerelease" ]]; then
+        echo "Published as \`$v\` only. Prereleases do not move \`latest\`."
+      else
+        echo "Also tagged \`${v%.*}\` and \`latest\`."
+      fi
+      echo
+      gh api "repos/{owner}/{repo}/releases/generate-notes" \
+        -f tag_name="v$v" --jq .body 2>/dev/null || true
+    } > "$notes"
+
+    gh release create "v$v" --verify-tag --title "v$v" --notes-file "$notes" $prerelease
+    echo "released v$v"
 
 # Arguments are POSITIONAL: `just push 1.2.3`, not `just push tag=1.2.3`.
 # Prefer `just release` - images built here carry no provenance or SBOM,

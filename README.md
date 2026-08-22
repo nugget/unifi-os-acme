@@ -64,9 +64,10 @@ $EDITOR .env
 docker compose up -d && docker compose logs -f
 ```
 
-`docker-compose.yml` builds locally. To use the published image instead,
-replace `build: .` with `image: ghcr.io/nugget/unifi-os-acme:latest` — or
-`:main`, which follows the default branch, if no release has been cut yet.
+`docker-compose.yml` pulls `ghcr.io/nugget/unifi-os-acme:latest`; nothing is
+built locally. To update, `docker compose pull && docker compose up -d` — compose
+will not re-pull on its own, so moving to a new release stays deliberate. For a
+local build, run `just build` and point `image:` at `unifi-os-acme:local`.
 
 Set `ACME_SERVER=letsencrypt_test` while you get it working. The staging CA
 issues untrusted certificates but has far looser rate limits, so a
@@ -75,6 +76,28 @@ misconfiguration costs you nothing.
 Your DNS provider's credentials are named by acme.sh (`CF_Token`,
 `LINODE_V4_API_KEY`, `AWS_ACCESS_KEY_ID`, …). Put them straight into `.env`;
 the whole file is passed through.
+
+## Portainer
+
+Portainer does not create a `.env`. It writes the stack's variables to
+`stack.env` in its own stack directory and hands them to the compose process,
+which makes them available for interpolation and for named passthrough — but
+**compose only passes variables it names**. That is why `docker-compose.yml`
+carries an explicit `environment:` list rather than relying on `env_file`.
+
+1. **Stacks → Add stack → Web editor**, paste `docker-compose.yml`.
+2. Add your settings under **Environment variables** — the same names as
+   `.env.example`, including your DNS provider's credentials.
+3. Deploy.
+
+`env_file` is still declared, marked `required: false`, so a command-line
+deployment can keep using `.env` and Portainer does not fail for the lack of
+one.
+
+If your DNS provider's credentials are not in the `environment:` list, add
+their names to it. A bare name passes the variable through when set and leaves
+it unset otherwise, so unused entries cost nothing and never become empty
+strings.
 
 ## Configuration
 
@@ -312,11 +335,16 @@ Available recipes:
 Recipe arguments are **positional**: `just push 1.2.3`, not `just push tag=1.2.3`.
 The `tag="edge"` in the listing is just showing you the default value.
 
-Releases go through `just release 1.0.0`, which checks the tree is clean and
-level with `origin/main`, then pushes a signed `v1.0.0` tag. CI builds from the
-tag and publishes `1.0.0`, `1.0`, and `latest` with provenance and an SBOM.
-Pushing images by hand is possible but produces neither, which is why `just
-push latest` refuses without an explicit override.
+Releases go through `just release 1.0.0`. It checks the tree is clean and level
+with `origin/main`, pushes a signed `v1.0.0` tag, waits for CI to publish the
+image, and then creates the GitHub release with generated notes. Waiting first
+means a release object never points at an image that failed to build; pass
+`SKIP_IMAGE_WAIT=1` to publish without waiting. CI publishes `1.0.0`, `1.0`, and
+`latest` with provenance and an SBOM; a prerelease (`1.0.0-rc.1`) publishes only
+itself and does not move `latest`.
+
+Pushing images by hand is possible but carries neither provenance nor an SBOM,
+which is why `just push latest` refuses without an explicit override.
 
 The test suite stands up mock authoritative nameservers and a mock
 `unifi-core` — which enforces the session cookie and CSRF header, and swaps its
