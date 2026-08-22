@@ -146,6 +146,31 @@ check "$(echo "$out" | grep -c 'cannot be dns_allns')" "1" "refuses to delegate 
 # The deploy hook, against a stand-in for unifi-core that enforces the session
 # cookie and CSRF header and swaps its TLS certificate on activation.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Entrypoint validation. Copying .env.example and filling in only the obvious
+# fields leaves the placeholder email, which the CA rejects with a 400 that
+# reads like its own fault.
+# ---------------------------------------------------------------------------
+echo "==> entrypoint validation"
+entry() {
+  docker run --rm --network "$NET" "$@" "$IMAGE" 2>&1
+}
+out=$(entry -e ACME_DOMAINS=x.example -e ACME_EMAIL=you@example.com \
+  -e ACME_DNS_PROVIDER=dns_cf -e DEPLOY_UNIFI_OS_USER=u -e DEPLOY_UNIFI_OS_PASSWORD=p \
+  -e ACME_RETRY_DELAY=0 || true)
+if echo "$out" | grep -q "still the placeholder"; then
+  ok "rejects the placeholder contact address"
+else
+  bad "rejects the placeholder contact address ($out)"
+fi
+out=$(entry -e ACME_DOMAINS=x.example -e ACME_EMAIL=real@nugget.test \
+  -e DEPLOY_UNIFI_OS_USER=u -e DEPLOY_UNIFI_OS_PASSWORD=p -e ACME_RETRY_DELAY=0 || true)
+if echo "$out" | grep -q "ACME_DNS_PROVIDER is required"; then
+  ok "names the missing DNS provider"
+else
+  bad "names the missing DNS provider ($out)"
+fi
+
 echo "==> deploy hook"
 CERTS=$(mktemp -d)
 ACME=$(mktemp -d)
@@ -222,6 +247,28 @@ fi
 # The healthcheck. It answers "is the certificate doing its job", so each of
 # the ways that can stop being true gets its own case.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Restarting with a certificate already in hand must still reconcile the
+# console. Otherwise a container that issued once and failed to install would
+# sit there looking fine until the next renewal, up to 60 days later.
+# ---------------------------------------------------------------------------
+echo "==> startup reconciliation"
+out=$(docker run --rm --network "$NET" -v "$ACME:/acme.sh" \
+  -e ACME_DOMAINS=mockunifi -e ACME_EMAIL=real@nugget.test \
+  -e ACME_DNS_PROVIDER=dns_cf -e RUN_ONCE=1 \
+  -e DEPLOY_UNIFI_OS_HOST=mockunifi -e DEPLOY_UNIFI_OS_USER=acme \
+  -e DEPLOY_UNIFI_OS_PASSWORD=s3cret "$IMAGE" 2>&1 || true)
+if echo "$out" | grep -q "Checking the console is serving it"; then
+  ok "reconciles the console on start when a certificate already exists"
+else
+  bad "reconciles the console on start when a certificate already exists ($out)"
+fi
+if echo "$out" | grep -qE "already active|is serving"; then
+  ok "runs the deploy hook rather than skipping straight to the daemon"
+else
+  bad "runs the deploy hook rather than skipping straight to the daemon ($out)"
+fi
+
 echo "==> healthcheck"
 
 health() { # extra docker env args...

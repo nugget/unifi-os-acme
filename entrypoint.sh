@@ -10,6 +10,7 @@ set -eu
 # $HOMEARGS and the assembled acme.sh argument lists are word-split on purpose.
 # shellcheck disable=SC2086
 
+LE_CONFIG_HOME="${LE_CONFIG_HOME:-/acme.sh}"
 ACME="$LE_WORKING_DIR/acme.sh"
 HOMEARGS="--home $LE_WORKING_DIR --config-home $LE_CONFIG_HOME"
 
@@ -36,6 +37,13 @@ esac
 # ---------------------------------------------------------------- validation
 [ -n "${ACME_DOMAINS:-}" ] || die "ACME_DOMAINS is required (one or more names, space or comma separated)."
 [ -n "${ACME_EMAIL:-}" ] || die "ACME_EMAIL is required to register an ACME account."
+# Let's Encrypt rejects reserved example domains with a 400 that reads like a
+# CA problem rather than a copied placeholder. Say so plainly instead.
+case "$ACME_EMAIL" in
+*@example.com | *@example.org | *@example.net | *@example.edu)
+  die "ACME_EMAIL is still the placeholder ($ACME_EMAIL). Certificate authorities reject example.* addresses; use a real one."
+  ;;
+esac
 [ -n "${ACME_DNS_PROVIDER:-}" ] || die "ACME_DNS_PROVIDER is required, e.g. dns_cf. See https://github.com/acmesh-official/acme.sh/wiki/dnsapi"
 [ -n "${DEPLOY_UNIFI_OS_USER:-}" ] || die "DEPLOY_UNIFI_OS_USER is required."
 [ -n "${DEPLOY_UNIFI_OS_PASSWORD:-}" ] || die "DEPLOY_UNIFI_OS_PASSWORD is required."
@@ -69,13 +77,31 @@ else
 fi
 
 # ---------------------------------------------------------------- issue once
-# acme.sh --list prints one row per certificate, main domain in column 1.
+# Look for the certificate file itself rather than parsing `acme.sh --list`:
+# the file is the thing that matters, and healthcheck.sh locates it the same
+# way, so the two cannot disagree about whether a certificate exists.
+# acme.sh keeps EC certificates in <domain>_ecc.
 _have_cert() {
-  "$ACME" $HOMEARGS --list 2>/dev/null | awk -v d="$1" 'NR>1 && $1==d {found=1} END {exit !found}'
+  [ -f "$LE_CONFIG_HOME/$1/$1.cer" ] || [ -f "$LE_CONFIG_HOME/${1}_ecc/$1.cer" ]
 }
 
 if _have_cert "$_primary" && [ "${ACME_FORCE_ISSUE:-0}" != "1" ]; then
   log "Certificate for $_primary already exists; skipping issuance."
+  # Skipping issuance must not mean skipping the console. A previous run may
+  # have issued the certificate and then failed to install it, or a firmware
+  # update may have reverted the console since. Without this, nothing would
+  # touch the console until the next renewal - up to 60 days of looking healthy
+  # while doing nothing. The deploy hook compares fingerprints and no-ops when
+  # the console is already current, so this is cheap to run on every start.
+  _ecc=""
+  [ -d "$LE_CONFIG_HOME/${_primary}_ecc" ] && _ecc="--ecc"
+  log "Checking the console is serving it."
+  if ! "$ACME" $HOMEARGS --deploy -d "$_primary" $_ecc --deploy-hook unifi_os; then
+    # Deliberately not fatal: renewals should keep running even if the console
+    # is unreachable right now. The healthcheck reports this state.
+    log "ERROR: could not install the certificate on the console (see above)."
+    log "The renewal daemon will still start; the healthcheck will report unhealthy."
+  fi
 else
   log "Registering ACME account with $ACME_SERVER"
   "$ACME" $HOMEARGS --register-account -m "$ACME_EMAIL" --server "$ACME_SERVER" ||

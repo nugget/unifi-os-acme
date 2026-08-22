@@ -2,14 +2,23 @@
 #
 #   docker compose up -d && docker compose logs -f
 #
+# Nothing is built locally; the image is pulled from ghcr.io.
+#
 # The container registers an ACME account, issues the certificate over DNS-01,
 # installs it on the console, and then stays up renewing it. Everything is
 # configured through .env - see that file for the full list.
 
 services:
   acme:
-    build: .
-    image: unifi-os-acme:local
+    # Published by CI from a release tag, multi-arch, with build provenance and
+    # an SBOM attached. `latest` only moves when a release is cut, and compose
+    # does not re-pull on its own, so updating stays a deliberate act:
+    #
+    #   docker compose pull && docker compose up -d
+    #
+    # To run a local build instead: `just build`, then set this to
+    # unifi-os-acme:local.
+    image: ghcr.io/nugget/unifi-os-acme:latest
     container_name: unifi-os-acme
     restart: unless-stopped
 

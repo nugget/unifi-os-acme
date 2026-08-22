@@ -1,2 +1,4 @@
 .env
 *.local
+# Never create a real .env in this tree - it is inside a synced folder, and a
+# test fixture written here propagates to machines running this in production.
