@@ -30,14 +30,28 @@ docker network create "$NET" >/dev/null
 # wrong project. Easy to regress, invisible unless asserted.
 # ---------------------------------------------------------------------------
 echo "==> image metadata"
-label() { docker image inspect "$IMAGE" --format "{{index .Config.Labels \"$1\"}}"; }
+# Go templates render a missing key as an empty string on some engines and as
+# the literal "<no value>" on others, which would quietly satisfy a bare -n
+# test. Normalise so the assertions mean the same thing everywhere.
+label() {
+  v=$(docker image inspect "$IMAGE" --format "{{index .Config.Labels \"$1\"}}")
+  [ "$v" = "<no value>" ] && v=""
+  printf '%s' "$v"
+}
 check "$(label org.opencontainers.image.title)" "unifi-os-acme" "declares its own title"
 check "$(label org.opencontainers.image.source)" "https://github.com/nugget/unifi-os-acme" "points at this repository"
 check "$(label org.opencontainers.image.licenses)" "GPL-3.0-only" "declares its license"
-if [ -n "$(label org.opencontainers.image.base.name)" ]; then
+# Assert the shape of the base reference rather than merely its presence: the
+# point of recording the base is that it is pinned, so check for a real digest.
+if echo "$(label org.opencontainers.image.base.name)" | grep -q "^docker.io/neilpang/acme.sh:"; then
   ok "records the base image it was built from"
 else
   bad "records the base image it was built from"
+fi
+if echo "$(label org.opencontainers.image.base.digest)" | grep -qE "^sha256:[0-9a-f]{64}$"; then
+  ok "records the base image digest, not just its tag"
+else
+  bad "records the base image digest, not just its tag"
 fi
 
 # ---------------------------------------------------------------------------
