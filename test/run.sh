@@ -198,6 +198,88 @@ else
   bad "explains an authentication failure"
 fi
 
+# ---------------------------------------------------------------------------
+# The healthcheck. It answers "is the certificate doing its job", so each of
+# the ways that can stop being true gets its own case.
+# ---------------------------------------------------------------------------
+echo "==> healthcheck"
+
+health() { # extra docker env args...
+  docker run --rm --network "$NET" -v "$ACME:/acme.sh" \
+    -e ACME_DOMAINS=mockunifi -e DEPLOY_UNIFI_OS_HOST=mockunifi "$@" \
+    --entrypoint /usr/local/bin/healthcheck.sh "$IMAGE" 2>&1
+}
+
+# The deploy above left the console serving our certificate.
+out=$(health || true)
+if echo "$out" | grep -q "^healthy: mockunifi is serving"; then
+  ok "healthy when the console is serving the issued certificate"
+else
+  bad "healthy when the console is serving the issued certificate ($out)"
+fi
+
+out=$(health -e DEPLOY_UNIFI_OS_HOST=nosuchhost.invalid || true)
+if echo "$out" | grep -q "did not complete a TLS handshake"; then
+  ok "unhealthy when the console cannot be reached"
+else
+  bad "unhealthy when the console cannot be reached ($out)"
+fi
+
+out=$(health -e ACME_DOMAINS=never-issued.example || true)
+if echo "$out" | grep -q "no certificate has been issued"; then
+  ok "unhealthy before the first certificate exists"
+else
+  bad "unhealthy before the first certificate exists ($out)"
+fi
+
+# A certificate inside the renewal window that has not renewed: expiry is
+# closing in and nothing else would say so.
+EXPIRING=$(mktemp -d)
+mkdir -p "$EXPIRING/expiring.test"
+docker run --rm -v "$EXPIRING/expiring.test:/out" --entrypoint sh "$IMAGE" -c '
+  openssl req -x509 -newkey rsa:2048 -nodes -keyout /out/expiring.test.key \
+    -out /out/expiring.test.cer -days 5 -subj "/CN=expiring.test" 2>/dev/null
+  chmod -R a+rw /out'
+out=$(docker run --rm -v "$EXPIRING:/acme.sh" -e ACME_DOMAINS=expiring.test \
+  --entrypoint /usr/local/bin/healthcheck.sh "$IMAGE" 2>&1 || true)
+rm -rf "$EXPIRING"
+if echo "$out" | grep -q "renewals are failing"; then
+  ok "unhealthy when expiry is closer than the renewal window"
+else
+  bad "unhealthy when expiry is closer than the renewal window ($out)"
+fi
+
+out=$(health -e DEPLOY_UNIFI_OS_HOST=nosuchhost.invalid -e HEALTHCHECK_CHECK_CONSOLE=0 || true)
+if echo "$out" | grep -q "console check disabled"; then
+  ok "skips the console check when told to"
+else
+  bad "skips the console check when told to ($out)"
+fi
+
+# Shell arithmetic turns a non-numeric threshold into 0, which would make the
+# expiry test `-checkend 0` and report healthy for anything not already dead.
+# A typo must not silently disable the check.
+out=$(health -e HEALTHCHECK_MIN_DAYS=abc || true)
+if echo "$out" | grep -q "must be a whole number of days"; then
+  ok "rejects a non-numeric expiry threshold"
+else
+  bad "rejects a non-numeric expiry threshold ($out)"
+fi
+if echo "$out" | grep -q "^healthy"; then
+  bad "does not report healthy on a bad threshold"
+else
+  ok "does not report healthy on a bad threshold"
+fi
+
+# The image sets LE_CONFIG_HOME, but the script is also run by hand, where
+# `set -u` would abort with "parameter not set" rather than anything useful.
+out=$(health -e LE_CONFIG_HOME -e HEALTHCHECK_CHECK_CONSOLE=0 || true)
+if echo "$out" | grep -q "^healthy"; then
+  ok "falls back to the default config home when the variable is absent"
+else
+  bad "falls back to the default config home when the variable is absent ($out)"
+fi
+
 echo
 echo "==> $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
