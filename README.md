@@ -77,6 +77,28 @@ Your DNS provider's credentials are named by acme.sh (`CF_Token`,
 `LINODE_V4_API_KEY`, `AWS_ACCESS_KEY_ID`, …). Put them straight into `.env`;
 the whole file is passed through.
 
+## Portainer
+
+Portainer does not create a `.env`. It writes the stack's variables to
+`stack.env` in its own stack directory and hands them to the compose process,
+which makes them available for interpolation and for named passthrough — but
+**compose only passes variables it names**. That is why `docker-compose.yml`
+carries an explicit `environment:` list rather than relying on `env_file`.
+
+1. **Stacks → Add stack → Web editor**, paste `docker-compose.yml`.
+2. Add your settings under **Environment variables** — the same names as
+   `.env.example`, including your DNS provider's credentials.
+3. Deploy.
+
+`env_file` is still declared, marked `required: false`, so a command-line
+deployment can keep using `.env` and Portainer does not fail for the lack of
+one.
+
+If your DNS provider's credentials are not in the `environment:` list, add
+their names to it. A bare name passes the variable through when set and leaves
+it unset otherwise, so unused entries cost nothing and never become empty
+strings.
+
 ## Configuration
 
 Every knob is an environment variable. Full annotated list in

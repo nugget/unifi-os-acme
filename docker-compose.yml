@@ -22,19 +22,92 @@ services:
     container_name: unifi-os-acme
     restart: unless-stopped
 
-    # Loads the whole file, which matters: your DNS provider's credentials are
-    # named by acme.sh (CF_Token, LINODE_V4_API_KEY, AWS_ACCESS_KEY_ID, ...) and
-    # this passes them through without needing an entry here for each one.
-    env_file: .env
+    # Two ways in, because they serve different deployments.
+    #
+    # `.env` is for the command line, and is optional so its absence is not an
+    # error: Portainer and other UI deployers do not create one. They pass
+    # stack variables to the compose process instead, which is what the
+    # `environment` list below picks up.
+    env_file:
+      - path: .env
+        required: false
+
+    # Compose only passes variables it names. A bare name means "take it from
+    # the environment if set, otherwise leave it unset" - so unset entries do
+    # not become empty strings, and acme.sh still falls back to whatever it
+    # saved on a previous run.
+    #
+    # Using a DNS provider whose credentials are not listed here? Add its
+    # variable names to this list. That is the one edit a new provider needs.
+    environment:
+      # This tool
+      - ACME_DOMAINS
+      - ACME_EMAIL
+      - ACME_SERVER
+      - ACME_KEYLENGTH
+      - ACME_DNS_PROVIDER
+      - ACME_NS_GATE
+      - ACME_DNSSLEEP
+      - ACME_EXTRA_ARGS
+      - ACME_RETRY_DELAY
+      - ACME_FORCE_ISSUE
+      - RUN_ONCE
+      - ALLNS_TIMEOUT
+      - ALLNS_INTERVAL
+      - ALLNS_SERVERS
+      - ALLNS_RESOLVER
+      - DEPLOY_UNIFI_OS_HOST
+      - DEPLOY_UNIFI_OS_USER
+      - DEPLOY_UNIFI_OS_PASSWORD
+      - DEPLOY_UNIFI_OS_NAME
+      - DEPLOY_UNIFI_OS_KEEP_OLD
+      - DEPLOY_UNIFI_OS_VERIFY
+      - HEALTHCHECK_MIN_DAYS
+      - HEALTHCHECK_CHECK_CONSOLE
+      # DNS provider credentials, named as acme.sh expects them.
+      # https://github.com/acmesh-official/acme.sh/wiki/dnsapi
+      - CF_Token             # Cloudflare
+      - CF_Account_ID
+      - CF_Zone_ID
+      - CF_Key
+      - CF_Email
+      - LINODE_V4_API_KEY    # Linode
+      - AWS_ACCESS_KEY_ID    # Route 53
+      - AWS_SECRET_ACCESS_KEY
+      - DO_API_KEY           # DigitalOcean
+      - GD_Key               # GoDaddy
+      - GD_Secret
+      - HETZNER_Token        # Hetzner
+      - GANDI_LIVEDNS_KEY    # Gandi
+      - OVH_AK               # OVH
+      - OVH_AS
+      - OVH_CK
+      - VULTR_API_KEY        # Vultr
+      - PORKBUN_API_KEY      # Porkbun
+      - PORKBUN_SECRET_API_KEY
+      - NAMECHEAP_API_KEY    # Namecheap
+      - NAMECHEAP_USERNAME
+      - NAMECHEAP_SOURCEIP
+      - DEDYN_TOKEN          # deSEC
+      - DEDYN_NAME
+      - DuckDNS_Token        # DuckDNS
+      - PDNS_Url             # PowerDNS
+      - PDNS_ServerId
+      - PDNS_Token
+      - NSUPDATE_SERVER      # RFC 2136
+      - NSUPDATE_KEY
+      - NSUPDATE_ZONE
+      - AZUREDNS_SUBSCRIPTIONID  # Azure
+      - AZUREDNS_TENANTID
+      - AZUREDNS_APPID
+      - AZUREDNS_CLIENTSECRET
+      # Pin acme.sh to the version the image ships. See the Dockerfile.
+      - AUTO_UPGRADE=0
 
     volumes:
       # Account key, certificates, per-domain config, and the renewal crontab.
       # Back this up: losing it means re-registering and re-issuing.
       - acme-data:/acme.sh
-
-    environment:
-      # Pin acme.sh to the version the image ships. See the Dockerfile.
-      AUTO_UPGRADE: "0"
 
     # The healthcheck is defined in the image, not here, so that one definition
     # covers `docker run` too. It reports unhealthy when no certificate has been
