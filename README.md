@@ -65,7 +65,8 @@ docker compose up -d && docker compose logs -f
 ```
 
 `docker-compose.yml` builds locally. To use the published image instead,
-replace `build: .` with `image: ghcr.io/nugget/unifi-os-acme:latest`.
+replace `build: .` with `image: ghcr.io/nugget/unifi-os-acme:latest` — or
+`:main`, which follows the default branch, if no release has been cut yet.
 
 Set `ACME_SERVER=letsencrypt_test` while you get it working. The staging CA
 issues untrusted certificates but has far looser rate limits, so a
@@ -304,8 +305,18 @@ Available recipes:
     build           # Build the image locally, with real OCI labels taken from git.
     labels          # Print the built image's OCI labels.
     health          # Run the healthcheck against a running container.
+    release version # Cut a signed release tag, e.g. `just release 1.0.0`.
     push tag="edge" # Build and push a multi-arch image to GHCR by hand.
 ```
+
+Recipe arguments are **positional**: `just push 1.2.3`, not `just push tag=1.2.3`.
+The `tag="edge"` in the listing is just showing you the default value.
+
+Releases go through `just release 1.0.0`, which checks the tree is clean and
+level with `origin/main`, then pushes a signed `v1.0.0` tag. CI builds from the
+tag and publishes `1.0.0`, `1.0`, and `latest` with provenance and an SBOM.
+Pushing images by hand is possible but produces neither, which is why `just
+push latest` refuses without an explicit override.
 
 The test suite stands up mock authoritative nameservers and a mock
 `unifi-core` — which enforces the session cookie and CSRF header, and swaps its

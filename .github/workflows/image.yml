@@ -43,7 +43,9 @@ jobs:
             type=sha,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            # A prerelease (v1.2.3-rc.1) publishes only its own version; it
+            # must not move latest onto an image nobody asked to be default.
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
 
       - id: build
         uses: docker/build-push-action@v6

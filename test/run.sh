@@ -29,6 +29,26 @@ docker network create "$NET" >/dev/null
 # base image and the result claims to be acme.sh, pointing registries at the
 # wrong project. Easy to regress, invisible unless asserted.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# `just release` version validation. The pattern is read out of the justfile
+# rather than restated here, so this tests the rule that actually runs.
+# ---------------------------------------------------------------------------
+echo "==> release version validation"
+semver_re=$(sed -n 's/.*=~ \(.*\) \]\]; then/\1/p' justfile | head -1)
+if [ -z "$semver_re" ]; then
+  bad "could not read the semver pattern out of the justfile"
+else
+  grep -q '"\$v" == \*+\*' justfile && ok "keeps a guard against build metadata" ||
+    bad "keeps a guard against build metadata"
+  accepts() { case "$1" in *+*) return 1 ;; esac; [[ "$1" =~ $semver_re ]]; }
+  for v in 1.0.0 0.1.0 1.2.3-rc.1; do
+    accepts "$v" && ok "accepts $v" || bad "accepts $v"
+  done
+  for v in 1.2.3.4 01.2.3 1.2.3+build 1.2 v1.0.0 notsemver; do
+    accepts "$v" && bad "rejects $v" || ok "rejects $v"
+  done
+fi
+
 echo "==> image metadata"
 # Go templates render a missing key as an empty string on some engines and as
 # the literal "<no value>" on others, which would quietly satisfy a bare -n
