@@ -64,6 +64,9 @@ $EDITOR .env
 docker compose up -d && docker compose logs -f
 ```
 
+`docker-compose.yml` builds locally. To use the published image instead,
+replace `build: .` with `image: ghcr.io/nugget/unifi-os-acme:latest`.
+
 Set `ACME_SERVER=letsencrypt_test` while you get it working. The staging CA
 issues untrusted certificates but has far looser rate limits, so a
 misconfiguration costs you nothing.
@@ -97,6 +100,39 @@ Every knob is an environment variable. Full annotated list in
 | `DEPLOY_UNIFI_OS_VERIFY` | `0` | Verify the console's own TLS certificate. |
 | `RUN_ONCE` | `0` | Issue/renew once and exit, for external schedulers. |
 | `ACME_EXTRA_ARGS` | | Appended to `acme.sh --issue`. |
+
+## The image
+
+Published to `ghcr.io/nugget/unifi-os-acme` for `linux/amd64`, `linux/arm64`,
+and `linux/arm/v7`, built by GitHub Actions with build provenance and an SBOM
+attached.
+
+`latest` moves only on a release tag; pushes to `main` publish `main` and
+`sha-<short>`. That is deliberate — a bad image here can leave you unable to
+reach your console's web UI, so following a moving tag is opt-in. To pin:
+
+```bash
+docker pull ghcr.io/nugget/unifi-os-acme:1.0.0
+# or by digest, which is what a pin really means
+docker pull ghcr.io/nugget/unifi-os-acme@sha256:...
+```
+
+The image carries full [OCI annotations](https://github.com/opencontainers/image-spec/blob/main/annotations.md)
+— title, description, source, licenses, version, revision, and the base image
+it was built from, by name *and* digest:
+
+```bash
+docker image inspect ghcr.io/nugget/unifi-os-acme:latest \
+  --format '{{json .Config.Labels}}' | jq
+```
+
+The base itself is pinned by digest in the `Dockerfile`, so a rebuild of an old
+commit produces the same thing rather than whatever the upstream tag points at
+today. Verify provenance with:
+
+```bash
+gh attestation verify oci://ghcr.io/nugget/unifi-os-acme:latest --owner nugget
+```
 
 ## The propagation gate
 
@@ -216,8 +252,9 @@ whose nameservers converge slowly.
 ```bash
 just ci      # shellcheck + integration tests
 just test    # integration tests only
-just build   # local image
-just push    # multi-arch image to ghcr.io (not yet published)
+just build   # local image, with real OCI labels from git
+just labels  # print the built image's OCI labels
+just push    # multi-arch image to ghcr.io by hand; CI normally does this
 ```
 
 The test suite stands up mock authoritative nameservers and a mock

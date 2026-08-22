@@ -1,0 +1,13 @@
+# Only the plugins and the entrypoint belong in the image.
+.git
+.github
+.gitignore
+.dockerignore
+test
+README.md
+AGENTS.md
+LICENSE
+justfile
+docker-compose.yml
+.env
+.env.example
