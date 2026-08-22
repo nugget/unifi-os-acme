@@ -15,6 +15,9 @@
 # plain TLS handshake.
 set -u
 
+# shellcheck source=lib/certpath.sh
+. /usr/local/lib/certpath.sh
+
 fail() {
   echo "unhealthy: $*"
   exit 1
@@ -45,15 +48,8 @@ esac
 primary="${ACME_DOMAINS%%[, ]*}"
 [ -n "$primary" ] || fail "ACME_DOMAINS does not begin with a domain name: '$ACME_DOMAINS'"
 
-# acme.sh keeps EC certificates in <domain>_ecc.
-cert=""
-for dir in "$LE_CONFIG_HOME/$primary" "$LE_CONFIG_HOME/${primary}_ecc"; do
-  if [ -f "$dir/$primary.cer" ]; then
-    cert="$dir/$primary.cer"
-    break
-  fi
-done
-[ -n "$cert" ] || fail "no certificate has been issued for $primary"
+select_cert "$primary" || fail "no certificate has been issued for $primary"
+cert="$CERT_FILE"
 
 # Renewal begins 30 days before expiry and retries four times a day. Falling
 # under MIN_DAYS means it has been failing for over a week, which nothing else

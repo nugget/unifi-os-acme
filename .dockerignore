@@ -1,4 +1,5 @@
-# Only the plugins, the entrypoint, and the healthcheck belong in the image.
+# Only the plugins, the entrypoint, the healthcheck, and their shared lib
+# belong in the image.
 .git
 .github
 .gitignore

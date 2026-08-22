@@ -16,7 +16,7 @@ ci: lint test
 lint:
     docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
       --shell=sh --severity=warning deploy/unifi_os.sh dnsapi/dns_allns.sh \
-      entrypoint.sh healthcheck.sh test/gate_harness.sh
+      entrypoint.sh healthcheck.sh lib/certpath.sh test/gate_harness.sh
     docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
       --shell=bash --severity=warning test/run.sh
     docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
