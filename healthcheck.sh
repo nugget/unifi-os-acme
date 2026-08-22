@@ -15,9 +15,6 @@
 # plain TLS handshake.
 set -u
 
-MIN_DAYS="${HEALTHCHECK_MIN_DAYS:-21}"
-CHECK_CONSOLE="${HEALTHCHECK_CHECK_CONSOLE:-1}"
-
 fail() {
   echo "unhealthy: $*"
   exit 1
@@ -25,16 +22,28 @@ fail() {
 
 fingerprint() {
   openssl x509 -noout -fingerprint -sha1 2>/dev/null |
-    cut -d= -f2 | tr -d ':\r\n' | tr 'A-Z' 'a-z'
+    cut -d= -f2 | tr -d ':\r\n' | tr '[:upper:]' '[:lower:]'
 }
+
+# Defaulted rather than assumed: the image sets this, but the script is also
+# run by hand, and `set -u` would otherwise abort with "parameter not set"
+# instead of anything a reader could act on.
+LE_CONFIG_HOME="${LE_CONFIG_HOME:-/acme.sh}"
+MIN_DAYS="${HEALTHCHECK_MIN_DAYS:-21}"
+CHECK_CONSOLE="${HEALTHCHECK_CHECK_CONSOLE:-1}"
+
+# Shell arithmetic resolves a non-numeric value to 0, which would turn the
+# expiry test into `-checkend 0` and report healthy for any certificate that
+# has not already expired. A typo here must not silently disable the check.
+case "$MIN_DAYS" in
+'' | *[!0-9]*) fail "HEALTHCHECK_MIN_DAYS must be a whole number of days, got '$MIN_DAYS'" ;;
+esac
 
 [ -n "${ACME_DOMAINS:-}" ] || fail "ACME_DOMAINS is not set"
 
-primary=""
-for d in $(echo "$ACME_DOMAINS" | tr ',' ' '); do
-  primary="$d"
-  break
-done
+# Only the first name is needed, and it names the certificate acme.sh stores.
+primary="${ACME_DOMAINS%%[, ]*}"
+[ -n "$primary" ] || fail "ACME_DOMAINS does not begin with a domain name: '$ACME_DOMAINS'"
 
 # acme.sh keeps EC certificates in <domain>_ecc.
 cert=""

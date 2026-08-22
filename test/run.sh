@@ -256,6 +256,30 @@ else
   bad "skips the console check when told to ($out)"
 fi
 
+# Shell arithmetic turns a non-numeric threshold into 0, which would make the
+# expiry test `-checkend 0` and report healthy for anything not already dead.
+# A typo must not silently disable the check.
+out=$(health -e HEALTHCHECK_MIN_DAYS=abc || true)
+if echo "$out" | grep -q "must be a whole number of days"; then
+  ok "rejects a non-numeric expiry threshold"
+else
+  bad "rejects a non-numeric expiry threshold ($out)"
+fi
+if echo "$out" | grep -q "^healthy"; then
+  bad "does not report healthy on a bad threshold"
+else
+  ok "does not report healthy on a bad threshold"
+fi
+
+# The image sets LE_CONFIG_HOME, but the script is also run by hand, where
+# `set -u` would abort with "parameter not set" rather than anything useful.
+out=$(health -e LE_CONFIG_HOME -e HEALTHCHECK_CHECK_CONSOLE=0 || true)
+if echo "$out" | grep -q "^healthy"; then
+  ok "falls back to the default config home when the variable is absent"
+else
+  bad "falls back to the default config home when the variable is absent ($out)"
+fi
+
 echo
 echo "==> $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

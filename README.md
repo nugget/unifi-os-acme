@@ -220,7 +220,7 @@ container looks perfectly fine, and each is checked directly:
 | Condition | Reported as |
 |---|---|
 | Issuance never succeeded | `no certificate has been issued for <name>` |
-| Renewals failing, expiry closing in | `expires <date>, under 21d away; renewals are failing` |
+| Renewals failing, expiry closing in | `expires <date>, under <HEALTHCHECK_MIN_DAYS>d away; renewals are failing` |
 | Console stopped serving our certificate | `<host> is serving <fp>, expected <fp>` |
 | Console unreachable | `<host> did not complete a TLS handshake` |
 
