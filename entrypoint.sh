@@ -87,21 +87,6 @@ _have_cert() {
 
 if _have_cert "$_primary" && [ "${ACME_FORCE_ISSUE:-0}" != "1" ]; then
   log "Certificate for $_primary already exists; skipping issuance."
-  # Skipping issuance must not mean skipping the console. A previous run may
-  # have issued the certificate and then failed to install it, or a firmware
-  # update may have reverted the console since. Without this, nothing would
-  # touch the console until the next renewal - up to 60 days of looking healthy
-  # while doing nothing. The deploy hook compares fingerprints and no-ops when
-  # the console is already current, so this is cheap to run on every start.
-  _ecc=""
-  [ -d "$LE_CONFIG_HOME/${_primary}_ecc" ] && _ecc="--ecc"
-  log "Checking the console is serving it."
-  if ! "$ACME" $HOMEARGS --deploy -d "$_primary" $_ecc --deploy-hook unifi_os; then
-    # Deliberately not fatal: renewals should keep running even if the console
-    # is unreachable right now. The healthcheck reports this state.
-    log "ERROR: could not install the certificate on the console (see above)."
-    log "The renewal daemon will still start; the healthcheck will report unhealthy."
-  fi
 else
   log "Registering ACME account with $ACME_SERVER"
   "$ACME" $HOMEARGS --register-account -m "$ACME_EMAIL" --server "$ACME_SERVER" ||
@@ -112,9 +97,34 @@ else
   "$ACME" $HOMEARGS --issue $_domain_args $_dns_args \
     --server "$ACME_SERVER" \
     --keylength "$ACME_KEYLENGTH" \
-    --deploy-hook unifi_os \
     ${ACME_FORCE_ISSUE:+--force} \
     ${ACME_EXTRA_ARGS:-} || die "Issuance failed. See the log above."
+fi
+
+# Install it, every time, whether or not we just issued.
+#
+# This is not belt and braces, it is the only thing that installs anything.
+# acme.sh accepts --deploy-hook on --issue and silently ignores it: the flag is
+# read only by the deploy command, and the post-issue deploy inside renew()
+# fires on Le_DeployHook, which lives in the domain conf and is written only by
+# an actual deploy. So `--issue --deploy-hook x` issues a certificate, installs
+# nothing, and leaves renewals with nothing to run either.
+#
+# Running the deploy explicitly installs the certificate now AND records
+# Le_DeployHook, which is what makes future renewals deploy on their own.
+#
+# It is also the reconciliation step: on a restart with a certificate already
+# in hand, this is what notices that the console is serving something else. The
+# hook compares fingerprints and no-ops when the console is current.
+_ecc=""
+[ -d "$LE_CONFIG_HOME/${_primary}_ecc" ] && _ecc="--ecc"
+log "Installing the certificate on the console."
+# shellcheck disable=SC2086
+if ! "$ACME" $HOMEARGS --deploy -d "$_primary" $_ecc --deploy-hook unifi_os; then
+  # Deliberately not fatal: renewals should keep running even if the console is
+  # unreachable right now. The healthcheck reports this state.
+  log "ERROR: could not install the certificate on the console (see above)."
+  log "The renewal daemon will still start; the healthcheck will report unhealthy."
 fi
 
 # ------------------------------------------------------------------- renewal

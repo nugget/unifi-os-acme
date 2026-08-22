@@ -307,9 +307,18 @@ cp dnsapi/dns_allns.sh  ~/.acme.sh/dnsapi/
 
 export ALLNS_PROVIDER=dns_cf
 export DEPLOY_UNIFI_OS_USER=acme DEPLOY_UNIFI_OS_PASSWORD=...
-acme.sh --issue -d unifi.example.com --dns dns_allns --dnssleep 1 \
-        --deploy-hook unifi_os
+acme.sh --issue  -d unifi.example.com --dns dns_allns --dnssleep 1
+acme.sh --deploy -d unifi.example.com --deploy-hook unifi_os
 ```
+
+The second command is not optional, and it is not the same as passing
+`--deploy-hook` to `--issue`. acme.sh accepts that flag on `--issue` and
+silently ignores it: the flag is read only by the deploy command, and the
+post-issue deploy fires on `Le_DeployHook` in the domain config, which only an
+actual deploy writes. `--issue --deploy-hook x` therefore issues a certificate,
+installs nothing, and leaves renewals with nothing to run either. Running
+`--deploy` once installs it and registers the hook, after which renewals deploy
+on their own.
 
 `dns_allns` is useful on its own, with no UniFi involved, for any provider
 whose nameservers converge slowly.

@@ -258,7 +258,7 @@ out=$(docker run --rm --network "$NET" -v "$ACME:/acme.sh" \
   -e ACME_DNS_PROVIDER=dns_cf -e RUN_ONCE=1 \
   -e DEPLOY_UNIFI_OS_HOST=mockunifi -e DEPLOY_UNIFI_OS_USER=acme \
   -e DEPLOY_UNIFI_OS_PASSWORD=s3cret "$IMAGE" 2>&1 || true)
-if echo "$out" | grep -q "Checking the console is serving it"; then
+if echo "$out" | grep -q "Installing the certificate on the console"; then
   ok "reconciles the console on start when a certificate already exists"
 else
   bad "reconciles the console on start when a certificate already exists ($out)"
@@ -267,6 +267,16 @@ if echo "$out" | grep -qE "already active|is serving"; then
   ok "runs the deploy hook rather than skipping straight to the daemon"
 else
   bad "runs the deploy hook rather than skipping straight to the daemon ($out)"
+fi
+
+# acme.sh accepts --deploy-hook on --issue and ignores it. The post-issue
+# deploy fires on Le_DeployHook in the domain conf, which only an actual
+# deploy writes. Without this line, renewals would install nothing, forever,
+# and the logs would look completely healthy.
+if grep -q "Le_DeployHook" "$ACME/mockunifi/mockunifi.conf"; then
+  ok "records Le_DeployHook so renewals deploy on their own"
+else
+  bad "records Le_DeployHook so renewals deploy on their own"
 fi
 
 echo "==> healthcheck"
