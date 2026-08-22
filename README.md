@@ -98,6 +98,8 @@ Every knob is an environment variable. Full annotated list in
 | `DEPLOY_UNIFI_OS_NAME` | `acme.sh` | Name prefix for uploaded certificates. |
 | `DEPLOY_UNIFI_OS_KEEP_OLD` | `0` | `1` keeps superseded certificates. |
 | `DEPLOY_UNIFI_OS_VERIFY` | `0` | Verify the console's own TLS certificate. |
+| `HEALTHCHECK_MIN_DAYS` | `21` | Report unhealthy under this many days to expiry. |
+| `HEALTHCHECK_CHECK_CONSOLE` | `1` | Also check the console is serving our certificate. |
 | `RUN_ONCE` | `0` | Issue/renew once and exit, for external schedulers. |
 | `ACME_EXTRA_ARGS` | | Appended to `acme.sh --issue`. |
 
@@ -204,6 +206,47 @@ That risk is why the deploy hook is careful:
 - **Only prunes its own.** Deletes only entries whose name carries
   `DEPLOY_UNIFI_OS_NAME`. Your hand-uploaded certificates are untouched.
 
+## Health
+
+The container carries a healthcheck, so `docker ps` and anything watching
+container health can tell you whether the certificate is actually doing its
+job — not merely whether a process is running.
+
+Liveness is not the interesting question here: the renewal daemon is the
+container's main process, so if it dies the container exits and you already
+know. What fails *silently* is the outcome. Three things can be wrong while the
+container looks perfectly fine, and each is checked directly:
+
+| Condition | Reported as |
+|---|---|
+| Issuance never succeeded | `no certificate has been issued for <name>` |
+| Renewals failing, expiry closing in | `expires <date>, under 21d away; renewals are failing` |
+| Console stopped serving our certificate | `<host> is serving <fp>, expected <fp>` |
+| Console unreachable | `<host> did not complete a TLS handshake` |
+
+The third one is worth having. A firmware update, another tool, or someone in
+the UI can replace the certificate on the console, and nothing in the ACME
+world would notice — the certificate is still valid, still renewed, just not
+the one being served. The check is a plain TLS handshake; no credentials
+involved.
+
+```console
+$ docker inspect --format '{{.State.Health.Status}}' unifi-os-acme
+healthy
+$ just health
+healthy: unifi.example.com is serving the certificate for unifi.example.com
+```
+
+Renewal begins 30 days before expiry, so crossing `HEALTHCHECK_MIN_DAYS`
+(default 21) means renewals have been failing for over a week. The start period
+is 40 minutes, which covers a first issuance that has to wait out DNS
+propagation.
+
+Note that Docker does not restart unhealthy containers on its own — this is a
+signal for you or your monitoring, not an action. Set
+`HEALTHCHECK_CHECK_CONSOLE=0` if the console is not reachable from the
+container between renewals.
+
 ## Troubleshooting
 
 **`Login failed (HTTP 401)`** — the account is not Local Access Only, or has
@@ -249,12 +292,19 @@ whose nameservers converge slowly.
 
 ## Development
 
-```bash
-just ci      # shellcheck + integration tests
-just test    # integration tests only
-just build   # local image, with real OCI labels from git
-just labels  # print the built image's OCI labels
-just push    # multi-arch image to ghcr.io by hand; CI normally does this
+A bare `just` lists what is available:
+
+```console
+$ just
+Available recipes:
+    default         # Show available recipes.
+    ci              # Full gate: lint + integration tests. Run before every push.
+    lint            # Shellcheck every script, in a container so there is nothing to install.
+    test            # Integration tests: mock nameservers, a mock console, no real CA.
+    build           # Build the image locally, with real OCI labels taken from git.
+    labels          # Print the built image's OCI labels.
+    health          # Run the healthcheck against a running container.
+    push tag="edge" # Build and push a multi-arch image to GHCR by hand.
 ```
 
 The test suite stands up mock authoritative nameservers and a mock

@@ -16,11 +16,19 @@ FROM neilpang/acme.sh@sha256:08bad323dd6537ea2caba64260ef6e70e96057c4d9214afb9c0
 COPY deploy/unifi_os.sh /acmebin/deploy/unifi_os.sh
 COPY dnsapi/dns_allns.sh /acmebin/dnsapi/dns_allns.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
 RUN chmod 0644 /acmebin/deploy/unifi_os.sh /acmebin/dnsapi/dns_allns.sh \
-  && chmod 0755 /usr/local/bin/entrypoint.sh
+  && chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD []
+
+# start-period covers a first issuance that has to wait out DNS propagation:
+# the gate's own default timeout is 30 minutes, and failures during the start
+# period do not count against the container. The interval is what decides how
+# quickly a certificate replaced on the console gets noticed.
+HEALTHCHECK --interval=15m --timeout=30s --start-period=40m --retries=3 \
+  CMD ["/usr/local/bin/healthcheck.sh"]
 
 # Declared last so a metadata-only change does not invalidate the layer cache.
 #

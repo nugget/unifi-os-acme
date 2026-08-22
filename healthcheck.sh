@@ -1,0 +1,75 @@
+#!/usr/bin/env sh
+# Is the certificate actually doing its job?
+#
+# Liveness is not the interesting question: the renewal daemon is the
+# container's main process, so if it dies the container exits and Docker
+# already knows. What fails silently is the outcome. Three things can be wrong
+# while the container looks perfectly fine:
+#
+#   1. Issuance never succeeded, so there is no certificate at all.
+#   2. Renewals have been failing for weeks and expiry is closing in.
+#   3. Something on the console replaced what we installed - a firmware
+#      update, another tool, or a person in the UI.
+#
+# Each is checked directly. No credentials are needed: the console check is a
+# plain TLS handshake.
+set -u
+
+MIN_DAYS="${HEALTHCHECK_MIN_DAYS:-21}"
+CHECK_CONSOLE="${HEALTHCHECK_CHECK_CONSOLE:-1}"
+
+fail() {
+  echo "unhealthy: $*"
+  exit 1
+}
+
+fingerprint() {
+  openssl x509 -noout -fingerprint -sha1 2>/dev/null |
+    cut -d= -f2 | tr -d ':\r\n' | tr 'A-Z' 'a-z'
+}
+
+[ -n "${ACME_DOMAINS:-}" ] || fail "ACME_DOMAINS is not set"
+
+primary=""
+for d in $(echo "$ACME_DOMAINS" | tr ',' ' '); do
+  primary="$d"
+  break
+done
+
+# acme.sh keeps EC certificates in <domain>_ecc.
+cert=""
+for dir in "$LE_CONFIG_HOME/$primary" "$LE_CONFIG_HOME/${primary}_ecc"; do
+  if [ -f "$dir/$primary.cer" ]; then
+    cert="$dir/$primary.cer"
+    break
+  fi
+done
+[ -n "$cert" ] || fail "no certificate has been issued for $primary"
+
+# Renewal begins 30 days before expiry and retries four times a day. Falling
+# under MIN_DAYS means it has been failing for over a week, which nothing else
+# would surface until the certificate actually lapsed.
+if ! openssl x509 -in "$cert" -noout -checkend "$((MIN_DAYS * 86400))" >/dev/null 2>&1; then
+  expiry="$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2)"
+  fail "certificate for $primary expires $expiry, under ${MIN_DAYS}d away; renewals are failing"
+fi
+
+if [ "$CHECK_CONSOLE" != "1" ]; then
+  echo "healthy: certificate for $primary is valid (console check disabled)"
+  exit 0
+fi
+
+host="${DEPLOY_UNIFI_OS_HOST:-$primary}"
+case "$host" in
+*:*) hostport="$host" ;;
+*) hostport="$host:443" ;;
+esac
+sni="${hostport%:*}"
+
+want="$(fingerprint <"$cert")"
+got="$(echo | openssl s_client -connect "$hostport" -servername "$sni" 2>/dev/null | fingerprint)"
+
+[ -n "$got" ] || fail "$host did not complete a TLS handshake"
+[ "$got" = "$want" ] || fail "$host is serving $got, expected $want"
+
+echo "healthy: $host is serving the certificate for $primary"

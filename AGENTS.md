@@ -25,6 +25,7 @@ nothing needs installing beyond Docker and just.
 | `deploy/unifi_os.sh` | acme.sh deploy hook. Installs the cert on the console. |
 | `dnsapi/dns_allns.sh` | acme.sh DNS provider. Wraps a real provider, gates on all authoritative nameservers. |
 | `entrypoint.sh` | Env vars in, `acme.sh --issue` and the renewal daemon out. |
+| `healthcheck.sh` | Answers "is the certificate doing its job", for the image's HEALTHCHECK. |
 | `test/run.sh` | The whole suite. Mock DNS + mock console, no network deps. |
 
 ## Conventions
@@ -68,6 +69,14 @@ reproduces the partial-propagation race the gate exists to fix, hermetically.
 and CSRF header, records the request sequence, and reloads its own TLS listener
 on activation so the hook's fingerprint verification is exercised for real. It
 also carries a hand-uploaded certificate the hook must leave alone.
+
+## Health
+
+The healthcheck deliberately does not test liveness. The renewal daemon is the
+container's main process, so its death already exits the container; what needs
+checking is the outcome, which fails silently. Keep it credential-free — the
+console check is a bare TLS handshake — so it stays safe to run every 15
+minutes.
 
 ## Contributing
 

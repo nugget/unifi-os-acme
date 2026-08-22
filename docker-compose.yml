@@ -27,6 +27,12 @@ services:
       # Pin acme.sh to the version the image ships. See the Dockerfile.
       AUTO_UPGRADE: "0"
 
+    # The healthcheck is defined in the image, not here, so that one definition
+    # covers `docker run` too. It reports unhealthy when no certificate has been
+    # issued, when expiry is closing in because renewals keep failing, or when
+    # the console stops serving what we installed. Tune it through .env with
+    # HEALTHCHECK_MIN_DAYS and HEALTHCHECK_CHECK_CONSOLE.
+
     # If the console's hostname only resolves on an internal view of DNS that
     # this host does not use, pin it here rather than depending on the resolver.
     # DNS-01 validation is unaffected either way - it never resolves this name.
