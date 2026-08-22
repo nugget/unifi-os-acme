@@ -9,13 +9,17 @@ default:
 ci: lint test
     @echo "ci ok"
 
-# Shellcheck every script, in a container so there is nothing to install.
+# Shellcheck every script and lint the workflows, in containers so there is
+# nothing to install.
+#
+# Lint every script and workflow.
 lint:
     docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
       --shell=sh --severity=warning deploy/unifi_os.sh dnsapi/dns_allns.sh \
       entrypoint.sh healthcheck.sh test/gate_harness.sh
     docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
       --shell=bash --severity=warning test/run.sh
+    docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
 
 # Integration tests: mock nameservers, a mock console, no real CA.
 test:
@@ -49,8 +53,18 @@ release version:
     #!/usr/bin/env bash
     set -euo pipefail
     v='{{ version }}'
-    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || {
-      echo "error: '$v' is not a semver version. Try: just release 1.0.0" >&2; exit 1; }
+    # Build metadata is valid semver but cannot be an image tag: '+' is not in
+    # the set Docker allows, so v1.2.3+build would tag the git repo and then
+    # fail in the registry.
+    if [[ "$v" == *+* ]]; then
+      echo "error: '$v' carries build metadata, which cannot appear in an image tag." >&2
+      exit 1
+    fi
+    # MAJOR.MINOR.PATCH with an optional prerelease. Rejects 1.2.3.4 and 01.2.3.
+    if [[ ! "$v" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+      echo "error: '$v' is not a semver version. Try: just release 1.0.0" >&2
+      exit 1
+    fi
     [[ -z "$(git status --porcelain)" ]] || {
       echo "error: working tree is dirty; commit or stash first." >&2; exit 1; }
     [[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]] || {
@@ -60,7 +74,12 @@ release version:
       echo "error: local main differs from origin/main; pull or push first." >&2; exit 1; }
     git tag -s "v$v" -m "v$v"
     git push origin "v$v"
-    echo "pushed v$v - CI will publish ghcr.io/nugget/unifi-os-acme:{$v,latest}"
+    if [[ "$v" == *-* ]]; then
+      echo "pushed v$v - CI will publish ghcr.io/nugget/unifi-os-acme:$v"
+      echo "(prerelease: latest and ${v%%-*} major.minor are deliberately not moved)"
+    else
+      echo "pushed v$v - CI will publish ghcr.io/nugget/unifi-os-acme: $v, ${v%.*}, latest"
+    fi
 
 # Arguments are POSITIONAL: `just push 1.2.3`, not `just push tag=1.2.3`.
 # Prefer `just release` - images built here carry no provenance or SBOM,
