@@ -40,13 +40,57 @@ labels: build
 health:
     docker compose exec acme /usr/local/bin/healthcheck.sh
 
-# CI publishes on push to main and on release tags; this is the manual path.
+# Cut a signed release tag. CI builds from it and publishes `latest` plus the
+# semver tags, with provenance and an SBOM attached. This is how `latest` is
+# meant to move.
+#
+# Cut a signed release tag, e.g. `just release 1.0.0`.
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v='{{ version }}'
+    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || {
+      echo "error: '$v' is not a semver version. Try: just release 1.0.0" >&2; exit 1; }
+    [[ -z "$(git status --porcelain)" ]] || {
+      echo "error: working tree is dirty; commit or stash first." >&2; exit 1; }
+    [[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]] || {
+      echo "error: releases are cut from main." >&2; exit 1; }
+    git fetch -q origin main
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || {
+      echo "error: local main differs from origin/main; pull or push first." >&2; exit 1; }
+    git tag -s "v$v" -m "v$v"
+    git push origin "v$v"
+    echo "pushed v$v - CI will publish ghcr.io/nugget/unifi-os-acme:{$v,latest}"
+
+# Arguments are POSITIONAL: `just push 1.2.3`, not `just push tag=1.2.3`.
+# Prefer `just release` - images built here carry no provenance or SBOM,
+# because those are produced by the CI build, not by docker buildx alone.
 # Requires: docker login ghcr.io
 #
 # Build and push a multi-arch image to GHCR by hand.
 push tag="edge":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag='{{ tag }}'
+    if [[ "$tag" == *=* ]]; then
+      echo "error: '$tag' looks like name=value, but just takes positional arguments." >&2
+      echo "       Did you mean:  just push ${tag#*=}" >&2
+      exit 1
+    fi
+    if [[ ! "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+      echo "error: '$tag' is not a valid image tag." >&2
+      exit 1
+    fi
+    if [[ "$tag" == "latest" && "${ALLOW_LATEST:-0}" != "1" ]]; then
+      echo "error: 'latest' is published by CI from a release tag, so it carries" >&2
+      echo "       provenance and an SBOM. Pushing it here would replace that with" >&2
+      echo "       an unattested image." >&2
+      echo "       Release properly:  just release 1.0.0" >&2
+      echo "       Override anyway:   ALLOW_LATEST=1 just push latest" >&2
+      exit 1
+    fi
     docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
-      --build-arg VERSION="{{ tag }}" \
+      --build-arg VERSION="$tag" \
       --build-arg REVISION="$(git rev-parse HEAD)" \
       --build-arg CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      -t ghcr.io/nugget/unifi-os-acme:{{ tag }} --push .
+      -t "ghcr.io/nugget/unifi-os-acme:$tag" --push .
